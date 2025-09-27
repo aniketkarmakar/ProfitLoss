@@ -1,19 +1,111 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/main"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    tools:context=".MainActivity">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Hello World!"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+    <LinearLayout
+        android:id="@+id/rootLayout"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+        <!-- Title -->
+        <TextView
+            android:id="@+id/titleTv"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Profit &amp; Loss — 10 FUN Questions"
+            android:textSize="22sp"
+            android:paddingBottom="12dp" />
+
+        <!-- Progress + Best -->
+        <TextView
+            android:id="@+id/progressTv"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:paddingBottom="2dp" />
+
+        <TextView
+            android:id="@+id/bestTv"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Best: 0 / 10 (Partial: 0)"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:paddingBottom="8dp" />
+
+        <!-- Question -->
+        <TextView
+            android:id="@+id/questionTv"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="20sp"
+            android:paddingBottom="16dp" />
+
+        <!-- Spinner (Type A only) -->
+        <Spinner
+            android:id="@+id/resultSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/spinner_border"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Single input -->
+        <EditText
+            android:id="@+id/inputEt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Enter answer"
+            android:inputType="number"
+            android:maxLength="6"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Helper -->
+        <TextView
+            android:id="@+id/helperTv"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Tip: "
+            android:textSize="14sp"
+            android:paddingBottom="8dp" />
+
+        <!-- Correct answer (shown on wrong) -->
+        <TextView
+            android:id="@+id/answerTv"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#B00020"
+            android:textSize="16sp"
+            android:visibility="gone"
+            android:paddingBottom="8dp" />
+
+        <!-- Submit -->
+        <Button
+            android:id="@+id/submitBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Submit" />
+
+        <!-- Next (shown on wrong) -->
+        <Button
+            android:id="@+id/nextBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="NEXT"
+            android:visibility="gone"
+            android:layout_marginTop="8dp" />
+
+        <!-- Restart (shown after finish) -->
+        <Button
+            android:id="@+id/restartBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Restart"
+            android:visibility="gone"
+            android:layout_marginTop="12dp" />
+
+    </LinearLayout>
+</ScrollView>
+

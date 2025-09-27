@@ -1,6 +1,7 @@
 // Cpyright Aniket 
 package com.example.myapplication;
 
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.media.MediaPlayer;
 import android.os.Bundle;
@@ -8,351 +9,385 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.text.Spannable;
 import android.text.SpannableString;
-import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+
+import android.speech.tts.TextToSpeech;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
-import android.speech.tts.TextToSpeech;
 import java.util.Locale;
-
+import java.util.Random;
 
 public class MainActivity extends AppCompatActivity {
 
-    // ----- Model -----
+    // ---------- Question kinds ----------
+    enum QuestionKind {
+        TYPE_A_GIVEN_CP_SP_FIND_CATEGORY_AND_AMOUNT, // spinner + amount
+        TYPE_B_GIVEN_CP_AND_PL_FIND_SP,              // numeric only
+        TYPE_C_GIVEN_SP_AND_PL_FIND_CP               // numeric only
+    }
+
+    // Underlying trade for generation
+    enum TradeType { PROFIT, LOSS, NONE }
+
+    // ---------- Model ----------
     static class Q {
-        final int cp;
-        final int sp;
-        Q(int cp, int sp) { this.cp = cp; this.sp = sp; }
+        final int cp;     // 0..200
+        final int sp;     // 0..200
+        final QuestionKind kind;
+
+        Q(int cp, int sp, QuestionKind kind) {
+            this.cp = cp;
+            this.sp = sp;
+            this.kind = kind;
+        }
+
         boolean isProfit() { return sp > cp; }
         boolean isLoss()   { return sp < cp; }
         int amount()       { return Math.abs(sp - cp); }
-        String text() {
-            return "CP = ₹" + cp + ", SP = ₹" + sp
-                    + "\n\nFind PROFIT or LOSS or NO PROFIT, NO LOSS\nHow much is the amount?";
-        }
+
         String categoryText() {
             if (isProfit()) return "PROFIT";
             if (isLoss()) return "LOSS";
             return "NO PROFIT, NO LOSS";
         }
+
+        String prompt() {
+            switch (kind) {
+                case TYPE_A_GIVEN_CP_SP_FIND_CATEGORY_AND_AMOUNT:
+                    return "CP = ₹" + cp + ", SP = ₹" + sp +
+                            "\n\nFind PROFIT or LOSS or NO PROFIT, NO LOSS\nHow much is the amount?";
+                case TYPE_B_GIVEN_CP_AND_PL_FIND_SP: {
+                    String pl = categoryText();
+                    return "CP = ₹" + cp + ", " + pl + " = ₹" + amount() +
+                            "\n\nWhat is the Selling Price (SP)?";
+                }
+                case TYPE_C_GIVEN_SP_AND_PL_FIND_CP: {
+                    String pl = categoryText();
+                    return "SP = ₹" + sp + ", " + pl + " = ₹" + amount() +
+                            "\n\nWhat is the Cost Price (CP)?";
+                }
+            }
+            return "";
+        }
     }
 
+    // ---------- State ----------
+    private final Random rng = new Random();
     private final List<Q> questions = new ArrayList<>();
     private int index = 0;
     private int score = 0;
-    private final Random rng = new Random();
 
-    // ----- UI -----
-    private TextView titleTv, progressTv, questionTv, helperTv, answerTv;
+    // partial credit counter (Type A: category right, amount wrong)
+    private int partialCredits = 0;
+
+    // High-score persistence
+    private static final String PREFS = "profitloss_prefs";
+    private static final String KEY_BEST_SCORE = "best_score";
+    private static final String KEY_BEST_PARTIAL = "best_partial";
+
+    // ---------- UI ----------
+    private TextView titleTv, progressTv, questionTv, helperTv, answerTv, bestTv;
+    private Spinner resultSpinner; // Type A only
     private EditText inputEt;
     private Button submitBtn, nextBtn;
-    private Spinner resultSpinner;
 
+    // ---------- TTS (optional) ----------
     private TextToSpeech tts;
 
-
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
 
-        regenerateQuestions(); // fresh random set each launch / restart
+        // --- bind views
+        titleTv    = findViewById(R.id.titleTv);
+        progressTv = findViewById(R.id.progressTv);
+        bestTv     = findViewById(R.id.bestTv);
+        questionTv = findViewById(R.id.questionTv);
+        resultSpinner = findViewById(R.id.resultSpinner);
+        inputEt    = findViewById(R.id.inputEt);
+        helperTv   = findViewById(R.id.helperTv);
+        answerTv   = findViewById(R.id.answerTv);
+        submitBtn  = findViewById(R.id.submitBtn);
+        nextBtn    = findViewById(R.id.nextBtn);
 
-        // Root layout
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(16), dp(16), dp(16));
-        root.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-        root.setGravity(Gravity.TOP);
-
-        // Title
-        titleTv = new TextView(this);
-        String text = "Hello Aritra!\n\nProfit & Loss — 10 FUN Questions";
-        SpannableString ss = new SpannableString(text);
+        // Title styling (bold “Hello” like before)
+        SpannableString ss = new SpannableString("Hello Aritra!\n\nProfit & Loss — 10 FUN Questions");
         ss.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
-                0, 4, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                0, 5, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
         titleTv.setText(ss);
-        titleTv.setTextSize(22f);
-        titleTv.setPadding(0, dp(24), 0, dp(12));
-        root.addView(titleTv);
-
-        // Progress
-        progressTv = new TextView(this);
-        progressTv.setTextSize(16f);
-        progressTv.setPadding(0, 0, 0, dp(8));
-        root.addView(progressTv);
-
-        // Question
-        questionTv = new TextView(this);
-        questionTv.setTextSize(20f);
-        questionTv.setPadding(0, 0, 0, dp(16));
-        root.addView(questionTv);
 
         // Spinner (with hint)
-        resultSpinner = new Spinner(this);
-        resultSpinner.setBackgroundResource(R.drawable.spinner_border);
         String[] options = {"Select Result", "PROFIT", "LOSS", "NO PROFIT, NO LOSS"};
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
                 this, android.R.layout.simple_spinner_item, options) {
             @Override public boolean isEnabled(int position) { return position != 0; }
-            @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
-                View view = super.getDropDownView(position, convertView, parent);
-                TextView tv = (TextView) view;
-                tv.setTextColor(position == 0 ? Color.RED : Color.GREEN);
-                return view;
-            }
         };
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         resultSpinner.setAdapter(adapter);
-        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        spLp.setMargins(0, 0, 0, dp(12));
-        resultSpinner.setLayoutParams(spLp);
-        root.addView(resultSpinner);
 
-        // Amount input
-        inputEt = new EditText(this);
-        inputEt.setHint("Enter amount (e.g., 15)");
+        // Input setup
         inputEt.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_SIGNED);
         inputEt.setFilters(new InputFilter[]{ new InputFilter.LengthFilter(6) });
-        LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        etLp.setMargins(0, 0, 0, dp(12));
-        inputEt.setLayoutParams(etLp);
-        root.addView(inputEt);
 
-        // Helper text
-        helperTv = new TextView(this);
-        helperTv.setText("Tip: Choose category and enter Amount = |SP − CP|.");
-        helperTv.setTextSize(14f);
-        helperTv.setPadding(0, 0, 0, dp(8));
-        root.addView(helperTv);
-
-        // Correct answer label (hidden until needed)
-        answerTv = new TextView(this);
-        answerTv.setTextSize(16f);
-        answerTv.setTextColor(Color.parseColor("#B00020")); // material error red-ish
-        answerTv.setVisibility(View.GONE);
-        answerTv.setPadding(0, 0, 0, dp(8));
-        root.addView(answerTv);
-
-        // Submit button
-        submitBtn = new Button(this);
-        submitBtn.setText("Submit");
+        // Buttons
         submitBtn.setOnClickListener(v -> onSubmit());
-        root.addView(submitBtn);
-
-        // NEXT button (hidden until a wrong answer)
-        nextBtn = new Button(this);
-        nextBtn.setText("NEXT");
-        nextBtn.setVisibility(View.GONE);
         nextBtn.setOnClickListener(v -> {
-            // Move to next question and clean up UI
             index++;
-            showQuestion();        // resets fields
+            showQuestion();
             submitBtn.setVisibility(View.VISIBLE);
             nextBtn.setVisibility(View.GONE);
             answerTv.setVisibility(View.GONE);
         });
-        LinearLayout.LayoutParams nbLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        nbLp.topMargin = dp(8);
-        nextBtn.setLayoutParams(nbLp);
-        root.addView(nextBtn);
 
-        setContentView(root);
+        // TTS (optional)
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
-                int result = tts.setLanguage(Locale.ENGLISH);
-                tts.setSpeechRate(0.9f);  // slower speech
-                tts.setPitch(1.0f);       // normal pitch
-                if (result == TextToSpeech.LANG_MISSING_DATA ||
-                        result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    Toast.makeText(this, "TTS language not supported!", Toast.LENGTH_SHORT).show();
-                }
+                tts.setLanguage(Locale.ENGLISH);
+                tts.setSpeechRate(0.9f);
+                tts.setPitch(1.0f);
             }
         });
 
+        regenerateQuestions();
+        showBestFromPrefs();
         showQuestion();
     }
 
-    @Override
-    protected void onDestroy() {
-        if (tts != null) {
-            tts.stop();
-            tts.shutdown();
-        }
-        super.onDestroy();
-    }
-    private void speak(String text) {
-        if (tts != null) {
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "utteranceId");
-        }
-    }
-
-    // -------------------- RANDOM QUESTION GENERATION --------------------
+    // ---------- Generation with constraints ----------
 
     private void regenerateQuestions() {
         questions.clear();
         index = 0;
         score = 0;
-        for (int i = 0; i < 10; i++) questions.add(generateRandomQ());
+        partialCredits = 0;
+        for (int i = 0; i < 10; i++) {
+            questions.add(generateRandomQ());
+        }
     }
 
-    /** |SP − CP| ≤ 20% of CP ; CP, SP ∈ [0..200]; type random */
-    /** Create one random question with |SP − CP| ≤ 20% of CP (and CP, SP within 0..200).
-     * 50% of the time, CP and SP are multiples of 10.
-     */
     private Q generateRandomQ() {
-        int type = rng.nextInt(3); // 0=PROFIT, 1=LOSS, 2=NONE
-        boolean useMultiplesOf10 = rng.nextBoolean(); // 50% true
+        boolean multiplesOf10 = rng.nextBoolean(); // ~50%
+        TradeType trade = randomTrade();
+        int cp, sp;
 
-        int cp;
-        int sp;
-
-        if (useMultiplesOf10) {
-            // CP as multiple of 10, avoid 0 to keep 20% > 0
+        if (multiplesOf10) {
             cp = (1 + rng.nextInt(20)) * 10; // 10..200
-        } else {
-            cp = 5 + rng.nextInt(196); // 5..200
-        }
-
-        if (type == 2) {
-            sp = cp;
-        } else if (type == 0) { // PROFIT
-            int maxPct = Math.max(1, (int)Math.floor(0.20 * cp));
-            int maxRoom = Math.max(1, 200 - cp);
-            int maxDelta = Math.max(1, Math.min(maxPct, maxRoom));
-            int delta = 1 + rng.nextInt(maxDelta);
-
-            sp = cp + delta;
-            if (useMultiplesOf10) {
-                // Round SP to nearest multiple of 10 within limit
-                sp = Math.min(200, Math.max(0, Math.round(sp / 10f) * 10));
-                if (sp == cp) sp = cp + 10; // ensure difference if possible
+            switch (trade) {
+                case NONE:
+                    sp = cp;
+                    break;
+                case PROFIT: {
+                    int maxPct = Math.max(1, (int) Math.floor(0.20 * cp));
+                    int room = 200 - cp;
+                    int maxDelta = Math.min(maxPct, room);
+                    int maxDelta10 = (maxDelta / 10) * 10;
+                    if (maxDelta10 < 10) maxDelta10 = 10;
+                    int steps = Math.max(1, maxDelta10 / 10);
+                    int delta = (1 + rng.nextInt(steps)) * 10;
+                    sp = cp + delta;
+                    break;
+                }
+                case LOSS: {
+                    int maxPct = Math.max(1, (int) Math.floor(0.20 * cp));
+                    int room = cp;
+                    int maxDelta = Math.min(maxPct, room);
+                    int maxDelta10 = (maxDelta / 10) * 10;
+                    if (maxDelta10 < 10) maxDelta10 = 10;
+                    int steps = Math.max(1, maxDelta10 / 10);
+                    int delta = (1 + rng.nextInt(steps)) * 10;
+                    sp = cp - delta;
+                    break;
+                }
+                default:
+                    sp = cp;
             }
-        } else { // LOSS
-            int maxPct = Math.max(1, (int)Math.floor(0.20 * cp));
-            int maxRoom = cp;
-            int maxDelta = Math.max(1, Math.min(maxPct, maxRoom));
-            int delta = 1 + rng.nextInt(maxDelta);
-
-            sp = cp - delta;
-            if (useMultiplesOf10) {
-                // Round SP to nearest multiple of 10 within limit
-                sp = Math.min(200, Math.max(0, Math.round(sp / 10f) * 10));
-                if (sp == cp) sp = Math.max(0, cp - 10); // ensure difference if possible
+        } else {
+            cp = 5 + rng.nextInt(196); // 5..200 (avoid 0 for % math)
+            switch (trade) {
+                case NONE:
+                    sp = cp;
+                    break;
+                case PROFIT: {
+                    int maxPct = Math.max(1, (int) Math.floor(0.20 * cp));
+                    int room = Math.max(1, 200 - cp);
+                    int maxDelta = Math.max(1, Math.min(maxPct, room));
+                    int delta = 1 + rng.nextInt(maxDelta);
+                    sp = cp + delta;
+                    break;
+                }
+                case LOSS: {
+                    int maxPct = Math.max(1, (int) Math.floor(0.20 * cp));
+                    int room = cp;
+                    int maxDelta = Math.max(1, Math.min(maxPct, room));
+                    int delta = 1 + rng.nextInt(maxDelta);
+                    sp = cp - delta;
+                    break;
+                }
+                default:
+                    sp = cp;
             }
         }
 
         cp = clamp(cp, 0, 200);
         sp = clamp(sp, 0, 200);
-        return new Q(cp, sp);
+
+        // Decide presentation
+        QuestionKind kind;
+        if (sp == cp) {
+            kind = QuestionKind.TYPE_A_GIVEN_CP_SP_FIND_CATEGORY_AND_AMOUNT; // NONE → only A
+        } else {
+            int r = rng.nextInt(3);
+            if (r == 0) kind = QuestionKind.TYPE_A_GIVEN_CP_SP_FIND_CATEGORY_AND_AMOUNT;
+            else if (r == 1) kind = QuestionKind.TYPE_B_GIVEN_CP_AND_PL_FIND_SP;
+            else kind = QuestionKind.TYPE_C_GIVEN_SP_AND_PL_FIND_CP;
+        }
+
+        return new Q(cp, sp, kind);
+    }
+
+    private TradeType randomTrade() {
+        int t = rng.nextInt(3);
+        if (t == 0) return TradeType.PROFIT;
+        if (t == 1) return TradeType.LOSS;
+        return TradeType.NONE;
     }
 
     private int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
 
-    // -------------------- QUIZ FLOW --------------------
+    // ---------- Flow ----------
+
+    private void showBestFromPrefs() {
+        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        int best = sp.getInt(KEY_BEST_SCORE, 0);
+        int bestPartial = sp.getInt(KEY_BEST_PARTIAL, 0);
+        bestTv.setText("Best: " + best + " / 10  (Partial: " + bestPartial + ")");
+    }
 
     private void showQuestion() {
         if (index >= questions.size()) { finishQuiz(); return; }
         Q q = questions.get(index);
+
         progressTv.setText("Question " + (index + 1) + " of " + questions.size() + "   |   Score: " + score);
-        questionTv.setText(q.text());
+        questionTv.setText(q.prompt());
+
+        answerTv.setVisibility(View.GONE);
+        nextBtn.setVisibility(View.GONE);
+        submitBtn.setVisibility(View.VISIBLE);
+
         inputEt.setText("");
-        resultSpinner.setSelection(0); // "Select Result"
         inputEt.requestFocus();
 
-        // Ensure the per-question widgets are in the clean state
-        submitBtn.setVisibility(View.VISIBLE);
-        nextBtn.setVisibility(View.GONE);
-        answerTv.setVisibility(View.GONE);
-    }
+        switch (q.kind) {
+            case TYPE_A_GIVEN_CP_SP_FIND_CATEGORY_AND_AMOUNT:
+                resultSpinner.setVisibility(View.VISIBLE);
+                resultSpinner.setSelection(0);
+                inputEt.setHint("Enter amount (e.g., 20)");
+                helperTv.setText("Tip: Choose category and enter Amount = |SP − CP|.");
+                break;
 
-    private void playSound(int soundResId) {
-        MediaPlayer mp = MediaPlayer.create(this, soundResId);
-        if (mp != null) {
-            mp.setOnCompletionListener(MediaPlayer::release);
-            mp.start();
+            case TYPE_B_GIVEN_CP_AND_PL_FIND_SP:
+                resultSpinner.setVisibility(View.GONE);
+                inputEt.setHint("Enter SP (e.g., 150)");
+                helperTv.setText("Tip: SP = CP ± Profit/Loss amount.");
+                break;
+
+            case TYPE_C_GIVEN_SP_AND_PL_FIND_CP:
+                resultSpinner.setVisibility(View.GONE);
+                inputEt.setHint("Enter CP (e.g., 120)");
+                helperTv.setText("Tip: CP = SP ∓ Profit/Loss amount.");
+                break;
         }
     }
 
     private void onSubmit() {
         if (index >= questions.size()) { finishQuiz(); return; }
-
-        String userText = inputEt.getText().toString().trim();
-        if (userText.isEmpty()) { inputEt.setError("Please enter an amount"); return; }
-
-        Integer userAns = null;
-        try { userAns = Integer.parseInt(userText); } catch (NumberFormatException ignored) {}
-        if (userAns == null) { inputEt.setError("Please enter a valid number"); return; }
-
         Q q = questions.get(index);
 
-        // Check category
-        String selected = resultSpinner.getSelectedItem().toString();
-        boolean categoryCorrect =
-                (selected.equals("PROFIT") && q.isProfit()) ||
-                        (selected.equals("LOSS") && q.isLoss()) ||
-                        (selected.equals("NO PROFIT, NO LOSS") && !q.isProfit() && !q.isLoss());
+        String userText = inputEt.getText().toString().trim();
+        if (userText.isEmpty()) {
+            inputEt.setError("Please enter your answer");
+            return;
+        }
 
-        // Check amount
-        boolean amountCorrect = (userAns == q.amount());
-        boolean correct = categoryCorrect && amountCorrect;
+        Integer userNum = null;
+        try { userNum = Integer.parseInt(userText); } catch (Exception ignored) {}
+        if (userNum == null) {
+            inputEt.setError("Please enter a valid number");
+            return;
+        }
+
+        boolean correct;
+        String expectedText;
+
+        switch (q.kind) {
+            case TYPE_A_GIVEN_CP_SP_FIND_CATEGORY_AND_AMOUNT: {
+                String selected = resultSpinner.getSelectedItem().toString();
+                boolean categoryCorrect =
+                        (selected.equals("PROFIT") && q.isProfit()) ||
+                                (selected.equals("LOSS") && q.isLoss()) ||
+                                (selected.equals("NO PROFIT, NO LOSS") && !q.isProfit() && !q.isLoss());
+                boolean amountCorrect = (userNum == q.amount());
+
+                if (!categoryCorrect && amountCorrect) {
+                    // user guessed amount but wrong category (rare on NONE)
+                    partialCredits++; // still count as partial effort
+                } else if (categoryCorrect && !amountCorrect) {
+                    partialCredits++; // category right = partial credit
+                }
+
+                correct = categoryCorrect && amountCorrect;
+                expectedText = q.categoryText() + " = ₹" + q.amount();
+                break;
+            }
+
+            case TYPE_B_GIVEN_CP_AND_PL_FIND_SP: {
+                correct = (userNum == q.sp);
+                expectedText = "SP = ₹" + q.sp + "  (" + q.categoryText() + " = ₹" + q.amount() + ")";
+                break;
+            }
+
+            case TYPE_C_GIVEN_SP_AND_PL_FIND_CP: {
+                correct = (userNum == q.cp);
+                expectedText = "CP = ₹" + q.cp + "  (" + q.categoryText() + " = ₹" + q.amount() + ")";
+                break;
+            }
+
+            default:
+                correct = false;
+                expectedText = "";
+        }
 
         if (correct) {
             score++;
             playSound(R.raw.correct);
 
-            // Brief toast + auto-advance after 500ms
-            Toast.makeText(this,
-                    "✅ Correct! " + q.categoryText() + " = ₹" + q.amount(),
-                    Toast.LENGTH_SHORT).show();
-
-            // Delay TTS by 500ms
-            submitBtn.postDelayed(() -> {
-                speak("Good Job Aritra");
-            }, 500);
-
-            // auto move after 500 ms more (e.g., 1000ms total)
+            // Speak after 500ms and auto-advance after 500ms
+            submitBtn.postDelayed(() -> speak("Good Job Aritra"), 500);
             submitBtn.postDelayed(() -> {
                 index++;
                 showQuestion();
-            }, 1000);
+            }, 500);
 
+            Toast.makeText(this, "✅ Correct!", Toast.LENGTH_SHORT).show();
         } else {
-            // Wrong: play angry, do NOT advance
             playSound(R.raw.wrong);
+            Toast.makeText(this, "❌ Try again!", Toast.LENGTH_SHORT).show();
 
-            // Feedback toast
-            String msg;
-            if (!categoryCorrect && !amountCorrect) {
-                msg = "❌ Wrong category and amount.";
-            } else if (!categoryCorrect) {
-                msg = "❌ Wrong category.";
-            } else {
-                msg = "❌ Wrong amount.";
-            }
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-
-            // Hide Submit, show correct answer + NEXT
-            submitBtn.setVisibility(View.GONE);
-            answerTv.setText("Correct: " + q.categoryText() + " = ₹" + q.amount());
+            // Reveal correct answer and show NEXT; hide Submit
+            answerTv.setText("Correct: " + expectedText);
             answerTv.setVisibility(View.VISIBLE);
+            submitBtn.setVisibility(View.GONE);
             nextBtn.setVisibility(View.VISIBLE);
         }
     }
@@ -363,40 +398,72 @@ public class MainActivity extends AppCompatActivity {
         resultSpinner.setEnabled(false);
         nextBtn.setEnabled(false);
 
-        String message = "Quiz Finished!\nYour Score: " + score + " / " + questions.size();
+        String message = "Quiz Finished!\nYour Score: " + score + " / " + questions.size() +
+                "\nPartial credits (Type A): " + partialCredits;
+
         if (score == 10) {
             message += "\n🎉 Excellent!";
-            speak("Excellent. Well Done Aritra. Keep it up");
-
-            //playSound(R.raw.outstanding);
-        } else if (score >= 7 ){
-            message += "\n👍 Good.";
+            playSound(R.raw.outstanding);
             speak("Well Done Aritra. Keep it up");
-
-            //playSound(R.raw.outstanding);
+        } else if (score >= 8) {
+            message += "\n👍 Good.";
+            playSound(R.raw.outstanding);
+            speak("Well Done Aritra");
         }
 
         questionTv.setText(message);
-        progressTv.setText("Great job!");
 
-        Button restartBtn = new Button(this);
-        restartBtn.setText("Restart");
-        restartBtn.setOnClickListener(v -> {
-            regenerateQuestions();  // fresh random questions on restart
-            inputEt.setEnabled(true);
-            resultSpinner.setEnabled(true);
-            submitBtn.setEnabled(true);
-            nextBtn.setEnabled(true);
-            submitBtn.setText("Submit");
-            showQuestion();
-        });
+        // Save bests
+        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        int best = sp.getInt(KEY_BEST_SCORE, 0);
+        int bestPartial = sp.getInt(KEY_BEST_PARTIAL, 0);
+        if (score > best || (score == best && partialCredits > bestPartial)) {
+            sp.edit()
+                    .putInt(KEY_BEST_SCORE, score)
+                    .putInt(KEY_BEST_PARTIAL, partialCredits)
+                    .apply();
+        }
+        showBestFromPrefs();
 
-        LinearLayout parent = (LinearLayout) submitBtn.getParent();
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(12);
-        parent.addView(restartBtn, lp);
+        // Add Restart button dynamically (below NEXT area)
+        Button restartBtn = findViewById(R.id.restartBtn);
+        if (restartBtn != null) {
+            restartBtn.setVisibility(View.VISIBLE);
+            restartBtn.setOnClickListener(v -> {
+                // reset
+                regenerateQuestions();
+                inputEt.setEnabled(true);
+                resultSpinner.setEnabled(true);
+                submitBtn.setEnabled(true);
+                nextBtn.setEnabled(true);
+                submitBtn.setText("Submit");
+                showQuestion();
+                v.setVisibility(View.GONE); // hide restart
+            });
+        }
     }
 
-    private int dp(int px) { return (int) (px * getResources().getDisplayMetrics().density); }
+    // ---------- Sound / TTS helpers ----------
+
+    private void playSound(int soundResId) {
+        MediaPlayer mp = MediaPlayer.create(this, soundResId);
+        if (mp != null) {
+            mp.setOnCompletionListener(MediaPlayer::release);
+            mp.start();
+        }
+    }
+
+    private void speak(String text) {
+        if (tts != null) {
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "utteranceId");
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (tts != null) {
+            try { tts.stop(); tts.shutdown(); } catch (Exception ignored) {}
+        }
+        super.onDestroy();
+    }
 }
