@@ -1,0 +1,43 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+    # Built application files
+    *.apk
+    *.ap_
+
+    # Files for the ART/Dalvik VM
+    *.dex
+
+    # Java class files
+    *.class
+
+    # Generated files
+    bin/
+    build/
+    .gradle/
+    local.properties
+    .idea/workspace.xml
+    .idea/libraries/
+    captures/
+    .externalNativeBuild/
+    .cxx/
+    # Android Studio and IntelliJ IDEA files
+    .idea/
+    # Gradle files
+    gradle/wrapper/gradle-wrapper.jar
+    # User-specific files
+    *.iml
+    *.ipr
+    *.iws
