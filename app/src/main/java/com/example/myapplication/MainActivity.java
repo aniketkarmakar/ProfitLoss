@@ -1,4 +1,4 @@
-// Cpyright Aniket 
+// Cpyright Aniket
 package com.example.myapplication;
 
 import android.content.SharedPreferences;
@@ -10,6 +10,8 @@ import android.text.InputType;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.view.View;
+import android.view.ViewPropertyAnimator;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -103,6 +105,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ---------- TTS (optional) ----------
     private TextToSpeech tts;
+
+    // ---------- Animation ----------
+    private static final long ANIM_DURATION_MS = 220;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -308,6 +313,9 @@ public class MainActivity extends AppCompatActivity {
                 helperTv.setText("Tip: CP = SP ∓ Profit/Loss amount.");
                 break;
         }
+
+        // NEW: animate the fresh question UI in
+        animateNewQuestion();
     }
 
     private void onSubmit() {
@@ -443,6 +451,33 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // ---------- Animation helpers ----------
+    private void animateIn(View v, long startDelayMs) {
+        if (v.getVisibility() != View.VISIBLE) return; // only animate visible views
+        v.animate().cancel();
+        v.setAlpha(0f);
+        v.setTranslationY(dp(12));
+        ViewPropertyAnimator a = v.animate()
+                .alpha(1f)
+                .translationY(0)
+                .setStartDelay(startDelayMs)
+                .setDuration(ANIM_DURATION_MS)
+                .setInterpolator(new DecelerateInterpolator());
+        a.start();
+    }
+
+    /** Animate all widgets that represent the "question UI". */
+    private void animateNewQuestion() {
+        long d = 0;
+        animateIn(questionTv, d);        d += 40;
+        if (resultSpinner.getVisibility() == View.VISIBLE) {
+            animateIn(resultSpinner, d); d += 40;
+        }
+        animateIn(inputEt, d);           d += 40;
+        animateIn(helperTv, d);          d += 40;
+        animateIn(submitBtn, d);
+    }
+
     // ---------- Sound / TTS helpers ----------
 
     private void playSound(int soundResId) {
@@ -466,4 +501,7 @@ public class MainActivity extends AppCompatActivity {
         }
         super.onDestroy();
     }
+
+    // ---------- utils ----------
+    private int dp(int px) { return (int) (px * getResources().getDisplayMetrics().density); }
 }
